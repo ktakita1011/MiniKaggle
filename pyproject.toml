@@ -1,0 +1,52 @@
+[project]
+name = "minikaggle"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "ktakita1011", email = "ktakita1011@gmail.com" }
+]
+dependencies = [
+    "streamlit==1.38.0",
+    "numpy>=2.1.0",
+    "pandas>=2.2.2",
+    "pysqlite3>=0.5.3",
+    "polars>=1.5.0",
+    "python-dotenv>=1.0.1",
+    "streamlit-authenticator==0.3.2",
+]
+readme = "README.md"
+requires-python = ">= 3.8"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = []
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["./", "./app"]
+
+[tool.ruff]
+# 行文字数
+line-length = 88
+# インデント幅
+indent-width = 4
+
+# Linterのルール
+[tool.ruff.lint]
+# Lintルール
+# https://docs.astral.sh/ruff/rules/ に記載されているルールのうち、Codeが前方一致するルールが適用されます
+select = ["E", "F", "I", "PLR"]
+# 除外するLintルール
+# selectで選択したルールから除外したいものを指定できます
+ignore = ["PLR2004"]
+# auto fixの対象にするルール
+fixable = ["ALL"]
+# auto fixから除外するルール
+# editor.formatOnSaveを使う際に自動でFixされると困るものを指定できます
+unfixable = ["F401"]
