@@ -1,3 +1,7 @@
+app/garbage
+data/*.db
+authenticator_config.yaml
+
 # python generated files
 __pycache__/
 *.py[oc]

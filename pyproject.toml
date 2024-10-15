@@ -29,7 +29,7 @@ dev-dependencies = []
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["./", "./app"]
+packages = ["./"]
 
 [tool.ruff]
 # 行文字数
