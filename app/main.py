@@ -1,10 +1,6 @@
 import streamlit as st
 from streamlit import session_state as ss
 
-from app.nav import MenuButtons
-from app.pages.account import get_roles
-from app.pages.page_03_submission import create_table
-
 # アプリケーションの設定
 st.set_page_config(
     page_title="My Streamlit App",
@@ -12,6 +8,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+from app.nav import MenuButtons
+from app.pages.account import get_roles
+from app.pages.page_03_submission import create_table
 
 create_table()
 

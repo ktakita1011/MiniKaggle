@@ -38,6 +38,8 @@ idna==3.8
 jinja2==3.1.4
     # via altair
     # via pydeck
+joblib==1.4.2
+    # via scikit-learn
 jsonschema==4.23.0
     # via altair
 jsonschema-specifications==2023.12.1
@@ -53,8 +55,11 @@ narwhals==1.5.5
 numpy==2.1.0
     # via minikaggle
     # via pandas
+    # via pandas-stubs
     # via pyarrow
     # via pydeck
+    # via scikit-learn
+    # via scipy
     # via streamlit
 packaging==24.1
     # via altair
@@ -62,6 +67,8 @@ packaging==24.1
 pandas==2.2.2
     # via minikaggle
     # via streamlit
+pandas-stubs==2.2.3.241009
+    # via minikaggle
 pillow==10.4.0
     # via streamlit
 polars==1.5.0
@@ -96,6 +103,10 @@ rich==13.7.1
 rpds-py==0.20.0
     # via jsonschema
     # via referencing
+scikit-learn==1.5.2
+    # via minikaggle
+scipy==1.14.1
+    # via scikit-learn
 six==1.16.0
     # via python-dateutil
 smmap==5.0.1
@@ -108,10 +119,14 @@ streamlit-authenticator==0.3.2
     # via minikaggle
 tenacity==8.5.0
     # via streamlit
+threadpoolctl==3.5.0
+    # via scikit-learn
 toml==0.10.2
     # via streamlit
 tornado==6.4.1
     # via streamlit
+types-pytz==2024.2.0.20241003
+    # via pandas-stubs
 typing-extensions==4.12.2
     # via altair
     # via streamlit
