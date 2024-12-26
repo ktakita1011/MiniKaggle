@@ -6,7 +6,7 @@ import streamlit as st
 
 # データベースから全ユーザーを取得する関数
 def get_all_users():
-    conn = sqlite3.connect("./data/users.db")
+    conn = sqlite3.connect("./database/users.db")
     c = conn.cursor()
     c.execute("SELECT username, email FROM users")
     users = c.fetchall()

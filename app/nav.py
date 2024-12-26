@@ -1,5 +1,9 @@
+import logging
+
 import streamlit as st
 from streamlit import session_state as ss
+
+logger = logging.getLogger(__name__)
 
 
 def HomeNav():
@@ -37,7 +41,7 @@ def MenuButtons(user_roles=None):
 
         # Show page 1 if the username that logged in is an admin.
         if ss.username in admins:
-            print("i am admin")
+            logger.info("i am admin")
 
         # (2) users with user and admin roles have access to page 2.
         Page1Nav()
