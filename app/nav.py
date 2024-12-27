@@ -1,9 +1,9 @@
-import logging
-
 import streamlit as st
 from streamlit import session_state as ss
 
-logger = logging.getLogger(__name__)
+from app.src.logger_config import get_cached_logger
+
+logger = get_cached_logger(__name__)
 
 
 def HomeNav():
@@ -22,6 +22,12 @@ def Page2Nav():
     st.sidebar.page_link("./pages/page_03_submission.py", label="submittion", icon="📚")
 
 
+def PrivateLBPageNav():
+    st.sidebar.page_link(
+        "./pages/page_04_private_leaderboard.py", label="Private_LB", icon="🔧"
+    )
+
+
 def MenuButtons(user_roles=None):
     if user_roles is None:
         user_roles = {}
@@ -30,19 +36,19 @@ def MenuButtons(user_roles=None):
         ss.authentication_status = False
 
     # Always show the home and login navigators.
-    # HomeNav()
+    HomeNav()
     LoginNav()
 
     # Show the other page navigators depending on the users' role.
     if ss["authentication_status"]:
-        # (1) Only the admin role can access page 1 and other pages.
-        # In a user roles get all the usernames with admin role.
+        # Get all the usernames with admin role.
         admins = [k for k, v in user_roles.items() if v == "admin"]
 
-        # Show page 1 if the username that logged in is an admin.
-        if ss.username in admins:
-            logger.info("i am admin")
-
-        # (2) users with user and admin roles have access to page 2.
+        # Show pages accessible to all authenticated users
         Page1Nav()
         Page2Nav()
+
+        # Show admin page only if the logged-in user is an admin
+        if ss.username in admins:
+            PrivateLBPageNav()
+            logger.info(f"Admin page shown for user: {ss.username}")

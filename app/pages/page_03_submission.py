@@ -11,19 +11,31 @@ from streamlit import session_state as ss
 
 from app.nav import MenuButtons
 from app.pages.account import get_roles
+from app.src.database import (
+    create_tables,
+    get_or_create_team_id,
+    get_or_create_user_id,
+    get_total_submission_count,
+    get_user_submissions,
+    insert_submission,
+    update_final_submissions,
+)
+from app.src.logger_config import get_cached_logger
 
-# ロガーの設定
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_cached_logger(__name__)
 
 # .env ファイルから環境変数をロード
 load_dotenv(".env")
 COMPETITION_ANSWER_COLUMN = os.environ.get("COMPETITION_ANSWER_COLUMN")
-SUBMITTION_DB_PATH = "./database/submissions.db"
 SUBMISSIONS_DIR = "./temp_files/uploaded_submissions"
+SUBMITTION_DB_PATH = "./database/submissions.db"
 FINAL_SUBMISSION_DB_PATH = "./database/final_submissions.db"
 OPTIMIZATION_DIRECTION = os.environ.get("OPTIMIZATION_DIRECTION", "min").lower()
 MAX_SUBMISSIONS = int(os.environ.get("MAX_SUBMISSIONS", 50))  # デフォルト値を50に設定
+COMPETITION_TEST_CSV_PATH = "./competition/test.csv"
+STOP_FINAL_SUBMISSION_SELECT = (
+    os.environ.get("STOP_FINAL_SUBMISSION_SELECT", "True").lower() == "true"
+)
 
 if "authentication_status" not in ss:
     st.switch_page("./pages/account.py")
@@ -34,104 +46,17 @@ def calculate_metric(predictions, actual):
     return ((predictions - actual) ** 2).mean()
 
 
-def create_table():
-    conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS submissions
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT,
-                  team TEXT,
-                  filename TEXT,
-                  public_score REAL,
-                  private_score REAL,
-                  timestamp TEXT)""")
-    conn.commit()
-    conn.close()
-
-
-def create_final_submission_table():
-    conn = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS final_submissions
-    (id INTEGER PRIMARY KEY,
-     username TEXT,
-     team TEXT,
-     filename TEXT,
-     public_score REAL,
-     private_score REAL,
-     timestamp TEXT)
-    """)
-    conn.commit()
-    conn.close()
-
-
-def insert_submission(username, team, public_score, private_score, timestamp, filename):
-    query = """
-    INSERT INTO submissions (username, team, filename, public_score, private_score, timestamp)
-    VALUES (:username, :team, :filename, :public_score, :private_score, :timestamp)
-    """
-    data = {
-        "username": username,
-        "team": team,
-        "filename": filename,
-        "public_score": public_score,
-        "private_score": private_score,
-        "timestamp": timestamp,
-    }
-
-    try:
-        with sqlite3.connect(SUBMITTION_DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, data)
-            conn.commit()
-        return True
-    except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-        return False
-
-
-def get_best_scores():
-    conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    c = conn.cursor()
-
-    agg_func = "MIN" if OPTIMIZATION_DIRECTION == "min" else "MAX"
-
-    # ユーザーごとの最高スコア
-    c.execute(f"""
-        SELECT username, {agg_func}(public_score) as best_public_score
-        FROM submissions
-        GROUP BY username
-        ORDER BY best_public_score {'ASC' if OPTIMIZATION_DIRECTION == 'min' else 'DESC'}
-    """)
-    user_leaderboard = pd.DataFrame(
-        c.fetchall(), columns=["username", "best_public_score"]
-    )
-
-    # チームごとの最高スコア
-    c.execute(f"""
-        SELECT team, {agg_func}(public_score) as best_public_score
-        FROM submissions
-        GROUP BY team
-        ORDER BY best_public_score {'ASC' if OPTIMIZATION_DIRECTION == 'min' else 'DESC'}
-    """)
-    team_leaderboard = pd.DataFrame(c.fetchall(), columns=["team", "best_public_score"])
-
-    conn.close()
-    return user_leaderboard, team_leaderboard
-
-
-def create_user_directory(username):
+def create_user_directory(user_id):
     """ユーザーごとのディレクトリを作成する"""
-    user_dir = os.path.join(SUBMISSIONS_DIR, username)
+    user_dir = os.path.join(SUBMISSIONS_DIR, str(user_id))
     if not os.path.exists(user_dir):
         os.makedirs(user_dir)
     return user_dir
 
 
-def save_submitted_csv(file, username, filename, timestamp):
+def save_submitted_csv(file, user_id, filename, timestamp):
     """提出されたCSVファイルを保存する"""
-    user_dir = create_user_directory(username)
+    user_dir = create_user_directory(user_id)
     save_filename = f"FILENAME_{filename}_TIMESTAMP_{timestamp}.csv"
     file_path = os.path.join(user_dir, save_filename)
 
@@ -141,27 +66,12 @@ def save_submitted_csv(file, username, filename, timestamp):
     return file_path
 
 
-def get_submission_count(username, date):
-    conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT COUNT(*) FROM submissions
-        WHERE username = ? AND DATE(timestamp) = DATE(?)
-    """,
-        (username, date),
-    )
-    count = c.fetchone()[0]
-    conn.close()
-    return count
-
-
 def get_public_private_score(uploaded_submit_csv):
     # CSVファイルの読み込み
     submit_df = pd.read_csv(uploaded_submit_csv)
 
     # 実際のデータ（この例では、これも提供されると仮定）
-    test_df = pd.read_csv("./competition/test.csv")
+    test_df = pd.read_csv(COMPETITION_TEST_CSV_PATH)
 
     # Public scoreとPrivate scoreの計算
     public_mask = test_df["is_public"] == 1
@@ -178,118 +88,42 @@ def get_public_private_score(uploaded_submit_csv):
     return public_score, private_score
 
 
-def select_final_submissions(username):
-    # 元のデータベースから提出を取得
-    conn_original = sqlite3.connect(SUBMITTION_DB_PATH)
-    query = """
-    SELECT * FROM submissions 
-    WHERE username = ? 
-    ORDER BY public_score DESC, timestamp DESC
-    LIMIT 2
-    """
-    final_submissions = pd.read_sql_query(query, conn_original, params=(username,))
-    conn_original.close()
-
-    # 最終提出を新しいデータベースに保存
-    conn_final = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
-    cursor = conn_final.cursor()
-
-    # 既存の最終提出を削除
-    cursor.execute("DELETE FROM final_submissions WHERE username = ?", (username,))
-
-    # 新しい最終提出を挿入
-    for _, submission in final_submissions.iterrows():
-        cursor.execute(
-            """
-        INSERT INTO final_submissions 
-        (username, team, public_score, private_score, timestamp) 
-        VALUES (?, ?, ?, ?, ?)
-        """,
-            (
-                submission["username"],
-                submission["team"],
-                submission["public_score"],
-                submission["private_score"],
-                submission["timestamp"],
-            ),
+def show_final_submission_selection_and_display(user_id):
+    def format_submission(index):
+        submission = submissions.loc[index]
+        return (
+            f"ID: {submission['user_submission_id']} - "
+            f"Time: {submission['timestamp']} - "
+            f"File: {submission['filename']} - "
+            f"Score: {round(submission['public_score'], 4)}"
         )
 
-    conn_final.commit()
-    conn_final.close()
-
-
-def get_user_submissions(username):
-    conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    query = """
-    SELECT * FROM submissions 
-    WHERE username = ? 
-    ORDER BY public_score DESC, timestamp DESC
-    """
-    submissions = pd.read_sql_query(query, conn, params=(username,))
-    conn.close()
-    return submissions
-
-
-def update_final_submissions(username, selected_ids):
-    conn_original = sqlite3.connect(SUBMITTION_DB_PATH)
-    conn_final = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
-
-    # 選択された提出を取得
-    query = "SELECT * FROM submissions WHERE id IN ({})".format(
-        ",".join(["?"] * len(selected_ids))
-    )
-    final_submissions = pd.read_sql_query(query, conn_original, params=selected_ids)
-
-    cursor = conn_final.cursor()
-
-    # 既存の最終提出を削除
-    cursor.execute("DELETE FROM final_submissions WHERE username = ?", (username,))
-
-    # 新しい最終提出を挿入
-    for _, submission in final_submissions.iterrows():
-        cursor.execute(
-            """
-        INSERT INTO final_submissions 
-        (id, username, team, public_score, private_score, timestamp, filename) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                submission["id"],
-                submission["username"],
-                submission["team"],
-                submission["public_score"],
-                submission["private_score"],
-                submission["timestamp"],
-                submission["filename"],
-            ),
-        )
-
-    conn_final.commit()
-    conn_original.close()
-    conn_final.close()
-
-
-def show_final_submission_selection_and_display(username):
-    st.subheader("最終提出の選択")
-
-    submissions = get_user_submissions(username)
-
-    if len(submissions) > 0:
+    submissions = get_user_submissions(user_id)
+    if STOP_FINAL_SUBMISSION_SELECT:
+        st.warning("最終提出の選択は現在停止されています。")
+    elif len(submissions) > 0:
+        st.subheader("最終提出の選択")
         # IDの降順でソート
-        submissions = submissions.sort_values("id", ascending=False)
+        submissions = submissions.sort_values("submission_id", ascending=False)
 
         st.write("最大2つの提出を選択してください。")
         selected_submissions = st.multiselect(
             "最終提出として選択する提出を選んでください：",
             options=submissions.index,
-            format_func=lambda x: f"ID: {submissions.loc[x, 'id']} - Score: {submissions.loc[x, 'public_score']} - Time: {submissions.loc[x, 'timestamp']} - File: {submissions.loc[x, 'filename']}",
+            format_func=format_submission,
             max_selections=2,
         )
 
+        # 空白追加 マルチセレクトの表示が最終提出を更新の表示と被るため。
+        for _ in range(5):
+            st.write("")
+
         if st.button("最終提出を更新"):
             if len(selected_submissions) > 0:
-                selected_ids = submissions.loc[selected_submissions, "id"].tolist()
-                update_final_submissions(username, selected_ids)
+                selected_ids = submissions.loc[
+                    selected_submissions, "submission_id"
+                ].tolist()
+                update_final_submissions(user_id, selected_ids)
                 st.success("最終提出が更新されました。")
             else:
                 st.warning("最終提出として少なくとも1つの提出を選択してください。")
@@ -298,39 +132,40 @@ def show_final_submission_selection_and_display(username):
 
     # 最終提出の表示
     st.subheader("現在の最終提出")
-    conn = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
-    final_submissions = pd.read_sql_query(
-        "SELECT * FROM final_submissions WHERE username = ? ORDER BY id DESC",
-        conn,
-        params=(username,),
-    )
-    conn.close()
+    conn_final = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
 
-    if len(final_submissions) > 0:
-        if os.environ.get("VISIBLE_PRIVATE_SCORE", "False").lower() == "true":
-            final_submissions = final_submissions.drop("private_score", axis=1)
+    query = """
+        SELECT user_submission_id, timestamp, filename, public_score
+        FROM final_submissions
+        WHERE user_id = ?
+        ORDER BY timestamp DESC
+    """
+    final_submissions = pd.read_sql_query(query, conn_final, params=(user_id,))
+
+    conn_final.close()
+
+    if not final_submissions.empty:
         st.dataframe(final_submissions)
     else:
-        st.info("最終提出はまだ選択されていません。")
+        st.info("最終提出が選択されていません。")
 
 
 def setup_page():
     MenuButtons(get_roles())
     st.title("提出ページ")
     st.write("ここで結果を提出できます。")
-    create_table()
-    create_final_submission_table()
+    create_tables()
 
 
-def get_best_public_score(username):
+def get_best_public_score(user_id):
     conn = sqlite3.connect(SUBMITTION_DB_PATH)
     c = conn.cursor()
     c.execute(
         f"""
         SELECT {'MIN' if OPTIMIZATION_DIRECTION == 'min' else 'MAX'}(public_score) FROM submissions
-        WHERE username = ?
+        WHERE user_id = ?
     """,
-        (username,),
+        (user_id,),
     )
     best_score = c.fetchone()[0]
     conn.close()
@@ -341,8 +176,8 @@ def get_best_public_score(username):
     )
 
 
-def handle_file_upload(username, team):
-    submission_count = get_total_submission_count(username)
+def handle_file_upload(user_id, team_name):
+    submission_count = get_total_submission_count(user_id)
     st.info(f"現在の提出回数: {submission_count}/{MAX_SUBMISSIONS}")
 
     if "form_submitted" not in ss:
@@ -356,47 +191,31 @@ def handle_file_upload(username, team):
             submit_button = st.form_submit_button(label="提出")
 
         if submit_button and uploaded_submit_csv is not None:
-            process_submission(username, team, uploaded_submit_csv)
+            process_submission(user_id, team_name, uploaded_submit_csv)
     else:
         show_new_submission_button()
 
 
-def get_total_submission_count(username):
-    conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT COUNT(*) FROM submissions
-        WHERE username = ?
-    """,
-        (username,),
-    )
-    count = c.fetchone()[0]
-    conn.close()
-    return count
-
-
-def process_submission(username, team, uploaded_submit_csv):
+def process_submission(user_id, team_name, uploaded_submit_csv):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     st.success("ファイルがアップロードされました！")
 
     public_score, private_score = get_public_private_score(uploaded_submit_csv)
-    st.write(f"Public Score: {public_score}")
-    st.write(f"Private Score: {private_score}")
 
     filename = uploaded_submit_csv.name
     logger.info(f"Uploaded file name: {filename}")
-    save_submitted_csv(uploaded_submit_csv, username, filename, timestamp)
+    save_submitted_csv(uploaded_submit_csv, user_id, filename, timestamp)
 
-    submission_count = get_total_submission_count(username)
+    submission_count = get_total_submission_count(user_id)
     if submission_count >= MAX_SUBMISSIONS:
         st.error(
             f"提出回数の上限（{MAX_SUBMISSIONS}回）に達しました。これ以上の提出はできません。"
         )
     else:
-        best_score = get_best_public_score(username)
+        best_score = get_best_public_score(user_id)
+        team_id = get_or_create_team_id(team_name)
         save_submission_to_database(
-            username, team, public_score, private_score, timestamp, filename
+            user_id, team_id, public_score, private_score, timestamp, filename
         )
 
         if (OPTIMIZATION_DIRECTION == "min" and public_score < best_score) or (
@@ -408,21 +227,21 @@ def process_submission(username, team, uploaded_submit_csv):
                 f"前回のベストスコア: {best_score:.4f} → 新しいベストスコア: {public_score:.4f}"
             )
         elif submission_count == 0:
-            st.info(
+            st.success(
                 "最初の提出おめでとうございます！これからどんどん改善していきましょう。"
             )
         else:
-            st.info(
+            st.success(
                 f"現在のベストPublic Score: {best_score:.4f}\n"
                 f"頑張って改善を続けましょう！"
             )
 
 
 def save_submission_to_database(
-    username, team, public_score, private_score, timestamp, filename
+    user_id, team_id, public_score, private_score, timestamp, filename
 ):
     success = insert_submission(
-        username, team, public_score, private_score, timestamp, filename
+        user_id, team_id, public_score, private_score, timestamp, filename
     )
     if success:
         st.info("結果が提出されました。データベースへスコア登録されました。")
@@ -440,27 +259,39 @@ def show_new_submission_button():
         st.rerun()
 
 
-def display_submission_history():
+def display_submission_history(user_id):
     st.subheader("提出履歴")
     conn = sqlite3.connect(SUBMITTION_DB_PATH)
-    history = pd.read_sql_query("SELECT * FROM submissions", conn)
+    query = """
+        SELECT s.user_submission_id, s.timestamp, s.filename, u.username, s.public_score, s.private_score
+        FROM submissions s
+        JOIN users u ON s.user_id = u.user_id
+        JOIN teams t ON s.team_id = t.team_id
+        WHERE s.user_id = ?
+        ORDER BY s.timestamp DESC
+    """
+    # もしチーム名も表示した場合はselect文に, t.team_name を追加する
+    history = pd.read_sql_query(query, conn, params=(user_id,))
     conn.close()
 
-    if os.environ.get("VISIBLE_PRIVATE_SCORE", "False").lower() == "true":
+    if os.environ.get("INVISIBLE_PRIVATE_SCORE", "False").lower() != "true":
         logger.info("Private score is invisible.")
         history = history.drop("private_score", axis=1)
 
-    st.dataframe(history)
+    if not history.empty:
+        st.dataframe(history, hide_index=True)
+    else:
+        st.info("まだ提出履歴がありません。")
 
 
 def show():
     setup_page()
-    username = ss.username
-    team = "None_Team"  # st.text_input("チーム名")
+    user_id = get_or_create_user_id(ss.username)
+    team_name = "None_Team"  # st.text_input("チーム名")
 
-    handle_file_upload(username, team)
-    display_submission_history()
-    show_final_submission_selection_and_display(username)
+    handle_file_upload(user_id, team_name)
+    display_submission_history(user_id)
+    show_final_submission_selection_and_display(user_id)
 
 
 if __name__ == "__main__":

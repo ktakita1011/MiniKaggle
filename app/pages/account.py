@@ -23,9 +23,8 @@ def get_roles():
         cred = {}
 
     return {
-        username: user_info["role"]
+        username: user_info.get("role", "user")
         for username, user_info in cred["usernames"].items()
-        if "role" in user_info
     }
 
 
@@ -62,6 +61,10 @@ with register_tab:
                 name_of_registered_user,
             ) = authenticator.register_user(pre_authorization=False)
             if email_of_registered_user:
+                # Add role to the newly registered user
+                config["credentials"]["usernames"][username_of_registered_user][
+                    "role"
+                ] = "user"
                 st.success("User registered successfully")
         except Exception as e:
             st.error(e)

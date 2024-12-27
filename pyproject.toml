@@ -16,6 +16,7 @@ dependencies = [
     "scikit-learn>=1.5.2",
     "pandas-stubs>=2.2.3.241009",
     "notebook>=7.3.2",
+    "plotly>=5.24.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
