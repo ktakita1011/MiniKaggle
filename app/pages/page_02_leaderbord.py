@@ -4,6 +4,7 @@ import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import yaml
 from dotenv import load_dotenv
 
 from app.nav import MenuButtons
@@ -11,12 +12,22 @@ from app.pages.account import get_roles
 
 SUBMITTION_DB_PATH = "./database/submissions.db"
 
-# 環境変数の読み込み
-load_dotenv()
-OPTIMIZATION_DIRECTION = os.getenv("OPTIMIZATION_DIRECTION", "max").lower()
+with open("competition_setting.yaml", "r") as file:
+    config = yaml.safe_load(file)
+OPTIMIZATION_DIRECTION = config["competition"]["optimization_direction"]
 
 
 def create_leaderboard_table(df):
+    # 順位とSubmit回数の最大値を取得
+    max_rank = df["順位"].max()
+    max_submit = df["Submit回数"].max()
+
+    # 列幅を動的に設定
+    rank_width = max(60, len(str(max_rank)) * 10)  # 最小幅60、文字数に応じて増加
+    submit_width = max(60, len(str(max_submit)) * 10)  # 最小幅60、文字数に応じて増加
+    team_width = 200  # チーム名用の固定幅
+    score_width = 100  # スコア用の固定幅
+
     fig = go.Figure(
         data=[
             go.Table(
@@ -25,7 +36,7 @@ def create_leaderboard_table(df):
                     fill_color="#FD8E72",
                     align="center",
                     font=dict(color="black", size=16),
-                ),  # ヘッダーの文字色を黒に変更
+                ),
                 cells=dict(
                     values=[df[col] for col in df.columns],
                     fill_color=[
@@ -33,15 +44,18 @@ def create_leaderboard_table(df):
                     ],
                     align="center",
                     font=dict(color="black", size=14),
-                ),  # セルの文字色を黒に変更
+                ),
+                columnwidth=[
+                    rank_width,
+                    team_width,
+                    score_width,
+                    submit_width,
+                ],  # 動的に列幅を設定
             )
         ]
     )
 
     fig.update_layout(
-        # title=dict(
-        #     text="リーダーボード", font=dict(size=24, color="black")
-        # ),  # タイトルの文字色も黒に変更
         margin=dict(l=0, r=0, t=40, b=0),
         height=800,
     )
@@ -54,18 +68,48 @@ def get_leaderboard():
 
     if OPTIMIZATION_DIRECTION == "max":
         query = """
-        SELECT u.username, MAX(s.public_score) as best_score
-        FROM submissions s
-        JOIN users u ON s.user_id = u.user_id
-        GROUP BY s.user_id
+        WITH user_best_scores AS (
+            SELECT 
+                s.user_id,
+                MAX(s.public_score) as best_score,
+                COUNT(*) as submit_count
+            FROM submissions s
+            GROUP BY s.user_id
+        )
+        SELECT 
+            tu.team_name,
+            MAX(ubs.best_score) as best_score,
+            COUNT(DISTINCT tu.user_id) as member_count,
+            SUM(ubs.submit_count) as submit_count,
+            GROUP_CONCAT(u.username, ', ') as team_members
+        FROM team_users tu
+        JOIN users u ON tu.user_id = u.user_id
+        JOIN user_best_scores ubs ON u.user_id = ubs.user_id
+        GROUP BY tu.team_name
+        HAVING best_score IS NOT NULL
         ORDER BY best_score DESC
         """
     else:  # min
         query = """
-        SELECT u.username, MIN(s.public_score) as best_score
-        FROM submissions s
-        JOIN users u ON s.user_id = u.user_id
-        GROUP BY s.user_id
+        WITH user_best_scores AS (
+            SELECT 
+                s.user_id,
+                MIN(s.public_score) as best_score,
+                COUNT(*) as submit_count
+            FROM submissions s
+            GROUP BY s.user_id
+        )
+        SELECT 
+            tu.team_name,
+            MIN(ubs.best_score) as best_score,
+            COUNT(DISTINCT tu.user_id) as member_count,
+            SUM(ubs.submit_count) as submit_count,
+            GROUP_CONCAT(u.username, ', ') as team_members
+        FROM team_users tu
+        JOIN users u ON tu.user_id = u.user_id
+        JOIN user_best_scores ubs ON u.user_id = ubs.user_id
+        GROUP BY tu.team_name
+        HAVING best_score IS NOT NULL
         ORDER BY best_score ASC
         """
 
@@ -76,12 +120,20 @@ def get_leaderboard():
     df["順位"] = range(1, len(df) + 1)
 
     # カラム名を変更
-    df = df.rename(columns={"username": "ユーザー", "best_score": "Public スコア"})
+    df = df.rename(
+        columns={
+            "team_name": "チーム名",
+            "best_score": "Public スコア",
+            "member_count": "メンバー数",
+            "submit_count": "Submit回数",
+            "team_members": "チームメンバー",
+        }
+    )
 
     # スコアを小数点以下4桁に丸める
     df["Public スコア"] = df["Public スコア"].round(3)
     # カラムの順序を変更
-    df = df[["順位", "ユーザー", "Public スコア"]]
+    df = df[["順位", "チーム名", "Public スコア", "Submit回数"]]
 
     return df
 

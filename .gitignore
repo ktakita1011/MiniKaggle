@@ -1,7 +1,10 @@
 app/garbage
 data/*.db
 authenticator_config.yaml
-
+html_files/*
+logs/*
+temp_files/*
+notebooks/*
 # python generated files
 __pycache__/
 *.py[oc]

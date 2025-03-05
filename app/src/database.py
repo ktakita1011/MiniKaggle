@@ -34,6 +34,13 @@ def create_tables():
                      (team_id INTEGER PRIMARY KEY AUTOINCREMENT,
                       team_name TEXT UNIQUE)""")
 
+    # TeamUsers テーブルを追加 (チーム情報とユーザーの関係を管理)
+    c_main.execute("""CREATE TABLE IF NOT EXISTS team_users
+                    (team_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    team_name TEXT UNIQUE,
+                    user_id INTEGER,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id))""")
+
     # Submissions テーブル (メインデータベースのみ)
     c_main.execute("""CREATE TABLE IF NOT EXISTS submissions
                      (submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,19 +105,106 @@ def get_or_create_user_id(username):
     return user_id
 
 
-def get_or_create_team_id(team_name):
+# def get_or_create_user_id(username):
+#     conn = sqlite3.connect(SUBMITTION_DB_PATH)
+#     c = conn.cursor()
+
+#     try:
+#         # ユーザーの確認と作成
+#         c.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+#         user_result = c.fetchone()
+#         if user_result:
+#             user_id = user_result[0]
+#         else:
+#             c.execute("INSERT INTO users (username) VALUES (?)", (username,))
+#             user_id = c.lastrowid
+
+#         # チームの確認と作成（ユーザーの存在に関わらず）
+#         c.execute("SELECT team_id FROM teams WHERE team_name = ?", (username,))
+#         team_result = c.fetchone()
+#         if not team_result:
+#             c.execute("INSERT INTO teams (team_name) VALUES (?)", (username,))
+#             team_id = c.lastrowid
+#         else:
+#             team_id = team_result[0]
+
+#         conn.commit()
+#         return user_id, team_id
+
+#     except sqlite3.Error as e:
+#         print(f"データベースエラー: {e}")
+#         conn.rollback()
+#         return None, None
+
+#     finally:
+#         conn.close()
+
+
+def get_or_create_team_id(user_id):
     conn = sqlite3.connect(SUBMITTION_DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT team_id FROM teams WHERE team_name = ?", (team_name,))
-    result = c.fetchone()
-    if result:
-        team_id = result[0]
-    else:
-        c.execute("INSERT INTO teams (team_name) VALUES (?)", (team_name,))
-        team_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return team_id
+
+    try:
+        # ユーザーの情報を取得
+        c.execute("SELECT username FROM users WHERE user_id = ?", (user_id,))
+        user_result = c.fetchone()
+
+        if not user_result:
+            # ユーザーが存在しない場合
+            print(f"エラー: ユーザーID {user_id} は存在しません。")
+            return None
+
+        username = user_result[0]
+
+        # team_usersテーブルからチーム情報を取得
+        c.execute(
+            "SELECT team_id, team_name FROM team_users WHERE user_id = ?", (user_id,)
+        )
+        team_result = c.fetchone()
+
+        if team_result:
+            # ユーザーに関連付けられたチームが存在する場合
+            team_id = team_result[0]
+        else:
+            # ユーザーに関連付けられたチームが存在しない場合、新しいエントリーを作成
+            team_id = user_id  # team_idをuser_idと同じ値に設定
+            c.execute(
+                "INSERT INTO team_users (team_id, team_name, user_id) VALUES (?, ?, ?)",
+                (team_id, username, user_id),
+            )
+
+        conn.commit()
+        return team_id
+
+    except sqlite3.Error as e:
+        print(f"データベースエラー: {e}")
+        conn.rollback()
+        return None
+
+    finally:
+        conn.close()
+
+
+def get_team_name(team_id):
+    conn = sqlite3.connect(SUBMITTION_DB_PATH)
+    c = conn.cursor()
+
+    try:
+        c.execute("SELECT team_name FROM teams WHERE team_id = ?", (team_id,))
+        result = c.fetchone()
+
+        if result:
+            return result[0]  # team_nameを返す
+        else:
+            print(f"エラー: チームID {team_id} は存在しません。")
+            return None
+
+    except sqlite3.Error as e:
+        print(f"データベースエラー: {e}")
+        return None
+
+    finally:
+        conn.close()
 
 
 def insert_submission(
@@ -153,7 +247,7 @@ def get_best_scores():
         FROM submissions
         JOIN users ON submissions.user_id = users.user_id
         GROUP BY users.user_id
-        ORDER BY best_public_score {'ASC' if OPTIMIZATION_DIRECTION == 'min' else 'DESC'}
+        ORDER BY best_public_score {"ASC" if OPTIMIZATION_DIRECTION == "min" else "DESC"}
     """)
     user_leaderboard = pd.DataFrame(
         c.fetchall(), columns=["username", "best_public_score"]
@@ -165,7 +259,7 @@ def get_best_scores():
         FROM submissions
         JOIN teams ON submissions.team_id = teams.team_id
         GROUP BY teams.team_id
-        ORDER BY best_public_score {'ASC' if OPTIMIZATION_DIRECTION == 'min' else 'DESC'}
+        ORDER BY best_public_score {"ASC" if OPTIMIZATION_DIRECTION == "min" else "DESC"}
     """)
     team_leaderboard = pd.DataFrame(c.fetchall(), columns=["team", "best_public_score"])
 
@@ -235,11 +329,10 @@ def get_user_submissions(user_id):
     conn = sqlite3.connect(SUBMITTION_DB_PATH)
     query = """
     SELECT s.submission_id, s.user_id, s.team_id, s.filename, s.public_score, s.private_score, s.timestamp,
-           u.username, t.team_name, s.user_submission_id
+           u.username, s.user_submission_id
     FROM submissions s
     JOIN users u ON s.user_id = u.user_id
-    JOIN teams t ON s.team_id = t.team_id
-    WHERE s.user_id = ? 
+    WHERE s.user_id = ?
     ORDER BY s.public_score DESC, s.timestamp DESC
     """
     submissions = pd.read_sql_query(query, conn, params=(user_id,))
@@ -252,10 +345,9 @@ def update_final_submissions(user_id, selected_ids):
     conn_final = sqlite3.connect(FINAL_SUBMISSION_DB_PATH)
 
     query = """
-    SELECT submissions.*, users.username, teams.team_name 
+    SELECT submissions.*, users.username
     FROM submissions 
     JOIN users ON submissions.user_id = users.user_id
-    JOIN teams ON submissions.team_id = teams.team_id
     WHERE submissions.submission_id IN ({})
     """.format(",".join(["?"] * len(selected_ids)))
     final_submissions = pd.read_sql_query(query, conn_original, params=selected_ids)

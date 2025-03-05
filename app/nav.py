@@ -19,7 +19,11 @@ def Page1Nav():
 
 
 def Page2Nav():
-    st.sidebar.page_link("./pages/page_03_submission.py", label="submittion", icon="📚")
+    st.sidebar.page_link("./pages/page_03_submission.py", label="submission", icon="📚")
+
+
+def TeamNav():
+    st.sidebar.page_link("./pages/page_05_change_teamname.py", label="Teams", icon="👥")
 
 
 def PrivateLBPageNav():
@@ -38,6 +42,7 @@ def MenuButtons(user_roles=None):
     # Always show the home and login navigators.
     HomeNav()
     LoginNav()
+    Page1Nav()
 
     # Show the other page navigators depending on the users' role.
     if ss["authentication_status"]:
@@ -45,8 +50,8 @@ def MenuButtons(user_roles=None):
         admins = [k for k, v in user_roles.items() if v == "admin"]
 
         # Show pages accessible to all authenticated users
-        Page1Nav()
         Page2Nav()
+        TeamNav()
 
         # Show admin page only if the logged-in user is an admin
         if ss.username in admins:

@@ -4,9 +4,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
+import yaml
 from streamlit import session_state as ss
 
 from app.nav import MenuButtons
@@ -15,6 +16,7 @@ from app.src.database import (
     create_tables,
     get_or_create_team_id,
     get_or_create_user_id,
+    get_team_name,
     get_total_submission_count,
     get_user_submissions,
     insert_submission,
@@ -24,18 +26,21 @@ from app.src.logger_config import get_cached_logger
 
 logger = get_cached_logger(__name__)
 
-# .env ファイルから環境変数をロード
-load_dotenv(".env")
-COMPETITION_ANSWER_COLUMN = os.environ.get("COMPETITION_ANSWER_COLUMN")
+with open("competition_setting.yaml", "r") as file:
+    config = yaml.safe_load(file)
+
+# max_submissionsの値を取得する
+max_submissions = config["competition"]["max_submissions"]
+COMPETITION_ANSWER_COLUMN = "全体平面度"  # os.environ.get("COMPETITION_ANSWER_COLUMN")
 SUBMISSIONS_DIR = "./temp_files/uploaded_submissions"
 SUBMITTION_DB_PATH = "./database/submissions.db"
 FINAL_SUBMISSION_DB_PATH = "./database/final_submissions.db"
-OPTIMIZATION_DIRECTION = os.environ.get("OPTIMIZATION_DIRECTION", "min").lower()
-MAX_SUBMISSIONS = int(os.environ.get("MAX_SUBMISSIONS", 50))  # デフォルト値を50に設定
+OPTIMIZATION_DIRECTION = config["competition"]["optimization_direction"]
+MAX_SUBMISSIONS = config["competition"]["max_submissions"]  # デフォルト値を50に設定
+if config["competition"]["stop_final_submission_select"]:
+    MAX_SUBMISSIONS = 9999
 COMPETITION_TEST_CSV_PATH = "./competition/test.csv"
-STOP_FINAL_SUBMISSION_SELECT = (
-    os.environ.get("STOP_FINAL_SUBMISSION_SELECT", "True").lower() == "true"
-)
+STOP_FINAL_SUBMISSION_SELECT = config["competition"]["stop_final_submission_select"]
 
 if "authentication_status" not in ss:
     st.switch_page("./pages/account.py")
@@ -43,7 +48,13 @@ if "authentication_status" not in ss:
 
 # メトリックを計算する関数（この例ではMSEを使用）
 def calculate_metric(predictions, actual):
-    return ((predictions - actual) ** 2).mean()
+    if config["competition"]["metric"] == "rmse":
+        mse = ((predictions - actual) ** 2).mean()
+        return np.sqrt(mse)
+    elif config["competition"]["metric"] == "mae":
+        return np.abs(predictions - actual).mean()
+    else:
+        raise ValueError("Unsupported metric specified in the configuration.")
 
 
 def create_user_directory(user_id):
@@ -57,7 +68,7 @@ def create_user_directory(user_id):
 def save_submitted_csv(file, user_id, filename, timestamp):
     """提出されたCSVファイルを保存する"""
     user_dir = create_user_directory(user_id)
-    save_filename = f"FILENAME_{filename}_TIMESTAMP_{timestamp}.csv"
+    save_filename = f"TIMESTAMP_{timestamp}_FILENAME_{filename}_USER_ID{user_id}.csv"
     file_path = os.path.join(user_dir, save_filename)
 
     with open(file_path, "wb") as f:
@@ -162,7 +173,7 @@ def get_best_public_score(user_id):
     c = conn.cursor()
     c.execute(
         f"""
-        SELECT {'MIN' if OPTIMIZATION_DIRECTION == 'min' else 'MAX'}(public_score) FROM submissions
+        SELECT {"MIN" if OPTIMIZATION_DIRECTION == "min" else "MAX"}(public_score) FROM submissions
         WHERE user_id = ?
     """,
         (user_id,),
@@ -207,6 +218,7 @@ def process_submission(user_id, team_name, uploaded_submit_csv):
     save_submitted_csv(uploaded_submit_csv, user_id, filename, timestamp)
 
     submission_count = get_total_submission_count(user_id)
+
     if submission_count >= MAX_SUBMISSIONS:
         st.error(
             f"提出回数の上限（{MAX_SUBMISSIONS}回）に達しました。これ以上の提出はできません。"
@@ -232,7 +244,7 @@ def process_submission(user_id, team_name, uploaded_submit_csv):
             )
         else:
             st.success(
-                f"現在のベストPublic Score: {best_score:.4f}\n"
+                f"提出したPublic Score: {public_score:.4f}\n"
                 f"頑張って改善を続けましょう！"
             )
 
@@ -263,10 +275,9 @@ def display_submission_history(user_id):
     st.subheader("提出履歴")
     conn = sqlite3.connect(SUBMITTION_DB_PATH)
     query = """
-        SELECT s.user_submission_id, s.timestamp, s.filename, u.username, s.public_score, s.private_score
+        SELECT s.user_id, s.timestamp, s.filename, u.username, s.public_score, s.private_score
         FROM submissions s
         JOIN users u ON s.user_id = u.user_id
-        JOIN teams t ON s.team_id = t.team_id
         WHERE s.user_id = ?
         ORDER BY s.timestamp DESC
     """
@@ -274,7 +285,7 @@ def display_submission_history(user_id):
     history = pd.read_sql_query(query, conn, params=(user_id,))
     conn.close()
 
-    if os.environ.get("INVISIBLE_PRIVATE_SCORE", "False").lower() != "true":
+    if not STOP_FINAL_SUBMISSION_SELECT:
         logger.info("Private score is invisible.")
         history = history.drop("private_score", axis=1)
 
@@ -287,7 +298,8 @@ def display_submission_history(user_id):
 def show():
     setup_page()
     user_id = get_or_create_user_id(ss.username)
-    team_name = "None_Team"  # st.text_input("チーム名")
+    team_id = get_or_create_team_id(user_id)
+    team_name = get_team_name(team_id)
 
     handle_file_upload(user_id, team_name)
     display_submission_history(user_id)
