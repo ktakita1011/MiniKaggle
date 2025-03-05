@@ -1,0 +1,16 @@
+cookie:
+  expiry_days: 30
+  key: some_signature_key
+  name: some_cookie_name
+credentials:
+  usernames:
+    admin:
+      email: admin@gmail.com
+      failed_login_attempts: 0
+      logged_in: true
+      name: admin
+      password: $2b$12$oUnbknAnZlzdx8pAiO2BWOxVR4G9H0wfRQ/2yeDrf.enMuNFagQga
+      role: admin
+preauthorized:
+  emails:
+  - melsby@gmail.com
