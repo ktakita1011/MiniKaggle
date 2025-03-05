@@ -134,6 +134,10 @@ def create_optimized_public_score_leaderboard(users_df, submissions_df):
             best_submission["submission_count"] = submission_count
             leaderboard_data.append(best_submission)
 
+    if len(leaderboard_data) == 0:
+        print("No submissions found for public_score leaderboard")
+        st.warning("No submissions found for public_score leaderboard")
+        return pd.DataFrame()
     # public_scoreでソート
     leaderboard_df = (
         pd.DataFrame(leaderboard_data)
