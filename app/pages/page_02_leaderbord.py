@@ -158,18 +158,21 @@ def show():
     fig = create_leaderboard_table(leaderboard.iloc[start_idx:end_idx])
     leaderboard_chart = st.plotly_chart(fig, use_container_width=True)
 
-    # ページ切り替えを下部に配置
-    st.write("")  # 空白を追加してスペースを作る
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        page = st.number_input("ページ", min_value=1, max_value=num_pages, value=1)
-        st.write(f"ページ {page}/{num_pages}")
+    if len(leaderboard) == 0:
+        st.write("提出データがありません")
+    else:
+        # ページ切り替えを下部に配置
+        st.write("")  # 空白を追加してスペースを作る
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            page = st.number_input("ページ", min_value=1, max_value=num_pages, value=1)
+            st.write(f"ページ {page}/{num_pages}")
 
-    # ページが変更されたら、リーダーボードを更新
-    start_idx = (page - 1) * items_per_page
-    end_idx = start_idx + items_per_page
-    fig = create_leaderboard_table(leaderboard.iloc[start_idx:end_idx])
-    leaderboard_chart.plotly_chart(fig, use_container_width=True)
+        # ページが変更されたら、リーダーボードを更新
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        fig = create_leaderboard_table(leaderboard.iloc[start_idx:end_idx])
+        leaderboard_chart.plotly_chart(fig, use_container_width=True)
 
 
 if __name__ == "__main__":

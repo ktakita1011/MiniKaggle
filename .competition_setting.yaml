@@ -4,7 +4,7 @@ invisible_private_score: true
 
 competition:
   name: "Competition"
-  answer_column: "target"
+  answer_column: "answer_column"
   max_submissions: 100
   optimization_direction: "min"  # max or min
   metric: "mae"

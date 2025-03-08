@@ -31,7 +31,7 @@ with open("competition_setting.yaml", "r") as file:
 
 # max_submissionsの値を取得する
 max_submissions = config["competition"]["max_submissions"]
-COMPETITION_ANSWER_COLUMN = "全体平面度"  # os.environ.get("COMPETITION_ANSWER_COLUMN")
+COMPETITION_ANSWER_COLUMN = config["competition"]["answer_column"]
 SUBMISSIONS_DIR = "./temp_files/uploaded_submissions"
 SUBMITTION_DB_PATH = "./database/submissions.db"
 FINAL_SUBMISSION_DB_PATH = "./database/final_submissions.db"
